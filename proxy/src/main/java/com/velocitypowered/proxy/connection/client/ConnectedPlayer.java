@@ -527,17 +527,28 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
 
   @Override
   public void removeResourcePacks(@NotNull UUID id, @NotNull UUID @NotNull ... others) {
-    this.connection.write(new RemoveResourcePack(id));
-    for (final UUID other : others) {
-      this.connection.write(new RemoveResourcePack(other));
+    final List<UUID> resourcePacksToRemove = new ArrayList<>(List.of(others));
+    resourcePacksToRemove.add(id);
+    synchronized (appliedResourcePacks) {
+      final Iterator<ResourcePackInfo> resourcePackInfoIterator = appliedResourcePacks.iterator();
+      while (resourcePackInfoIterator.hasNext()) {
+        final ResourcePackInfo resourcePack = resourcePackInfoIterator.next();
+        if (resourcePacksToRemove.contains(resourcePack.id())) {
+          resourcePackInfoIterator.remove();
+          this.connection.write(new RemoveResourcePack(resourcePack.id()));
+        }
+      }
     }
-    // TODO: change attributes
   }
 
   @Override
   public void clearResourcePacks() {
-    this.connection.write(new RemoveResourcePack(null));
-    // TODO: change attributes
+    for (final ResourcePackInfo resourcePack : this.appliedResourcePacks) {
+      this.connection.write(new RemoveResourcePack(resourcePack.id()));
+    }
+    appliedResourcePacks.clear();
+    outstandingResourcePacks.clear();
+    pendingResourcePacks.clear();
   }
 
   @Override
