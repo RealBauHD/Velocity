@@ -28,6 +28,7 @@ import java.util.function.UnaryOperator;
 import net.kyori.adventure.identity.Identified;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.key.Keyed;
+import net.kyori.adventure.resource.ResourcePackRequest;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.event.HoverEventSource;
@@ -202,7 +203,7 @@ public interface Player extends
    * sent resource pack, subscribe to {@link PlayerResourcePackStatusEvent}.
    *
    * @param url the URL for the resource pack
-   * @deprecated Use {@link #sendResourcePackOffer(ResourcePackInfo)} instead
+   * @deprecated Use {@link #sendResourcePacks(ResourcePackRequest)} instead
    */
   @Deprecated
   void sendResourcePack(String url);
@@ -214,7 +215,7 @@ public interface Player extends
    *
    * @param url the URL for the resource pack
    * @param hash the SHA-1 hash value for the resource pack
-   * @deprecated Use {@link #sendResourcePackOffer(ResourcePackInfo)} instead
+   * @deprecated Use {@link #sendResourcePacks(ResourcePackRequest)} instead
    */
   @Deprecated
   void sendResourcePack(String url, byte[] hash);
@@ -227,46 +228,50 @@ public interface Player extends
    * {@link ProxyServer#createResourcePackBuilder(String)} builder.
    *
    * @param packInfo the resource-pack in question
+   * @deprecated Use {@link #sendResourcePacks(ResourcePackRequest)}
    */
+  @Deprecated
   void sendResourcePackOffer(ResourcePackInfo packInfo);
 
   /**
-   * Gets the {@link ResourcePackInfo} of the currently applied
-   * resource-pack or null if none.
+   * Gets the first {@link ResourcePackInfo} of the currently applied
+   * resource-packs or null if none.
    *
    * @return the applied resource pack or null if none.
+   * @deprecated Use {@link #getAppliedResourcePacks()}
    */
   @Nullable
   @Deprecated
   ResourcePackInfo getAppliedResourcePack();
 
   /**
-   * Gets the {@link ResourcePackInfo} of the resource pack
+   * Gets the first {@link ResourcePackInfo} of the resource packs
    * the user is currently downloading or is currently
    * prompted to install or null if none.
    *
    * @return the pending resource pack or null if none
+   * @deprecated Use {@link #getPendingResourcePacks()}
    */
   @Nullable
   @Deprecated
   ResourcePackInfo getPendingResourcePack();
 
   /**
-   * Gets the {@link ResourcePackInfo} of the currently applied
+   * Gets the {@link ResourcePackRequest} of the currently applied
    * resource-packs.
    *
    * @return collection of the applied resource packs.
    */
-  Collection<ResourcePackInfo> getAppliedResourcePacks();
+  Collection<net.kyori.adventure.resource.ResourcePackInfo> getAppliedResourcePacks();
 
   /**
-   * Gets the {@link ResourcePackInfo} of the resource packs
+   * Gets the {@link ResourcePackRequest} of the resource packs
    * the user is currently downloading or is currently
    * prompted to install.
    *
    * @return collection of the pending resource packs
    */
-  Collection<ResourcePackInfo> getPendingResourcePacks();
+  Collection<ResourcePackRequest> getPendingResourcePacks();
 
   /**
    * <strong>Note that this method does not send a plugin message to the server the player
@@ -288,7 +293,7 @@ public interface Player extends
   @Override
   default @NotNull HoverEvent<HoverEvent.ShowEntity> asHoverEvent(
           @NotNull UnaryOperator<HoverEvent.ShowEntity> op) {
-    return HoverEvent.showEntity(op.apply(HoverEvent.ShowEntity.of(this, getUniqueId(),
+    return HoverEvent.showEntity(op.apply(HoverEvent.ShowEntity.showEntity(this, getUniqueId(),
             Component.text(getUsername()))));
   }
 

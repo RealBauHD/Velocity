@@ -44,6 +44,7 @@ import com.velocitypowered.proxy.protocol.packet.config.StartUpdate;
 import com.velocitypowered.proxy.protocol.packet.config.TagsUpdate;
 import com.velocitypowered.proxy.protocol.util.PluginMessageUtil;
 import java.io.IOException;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
@@ -61,7 +62,7 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
   private final VelocityServerConnection serverConn;
   private final CompletableFuture<Impl> resultFuture;
 
-  private ResourcePackInfo resourcePackToApply;
+  private Collection<net.kyori.adventure.resource.ResourcePackInfo> resourcePackToApply;
 
   private State state;
 
@@ -83,8 +84,8 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
   @Override
   public void activated() {
     ConnectedPlayer player = serverConn.getPlayer();
-    if (player.getProtocolVersion() == ProtocolVersion.MINECRAFT_1_20_2) {
-      resourcePackToApply = player.getAppliedResourcePack();
+    if (player.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_20_2) > 0) {
+      resourcePackToApply = player.getAppliedResourcePacks();
       player.clearAppliedResourcePack();
     }
   }
@@ -135,8 +136,11 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
               ResourcePackInfo.Origin.DOWNSTREAM_SERVER);
         }
 
-        resourcePackToApply = null;
-        serverConn.getPlayer().queueResourcePack(toSend);
+        if (playerConnection.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_20_2) <= 0) {
+          resourcePackToApply.clear();
+        }
+
+        serverConn.getPlayer().queueResourcePack(toSend.asResourcePackRequest());
       } else if (serverConn.getConnection() != null) {
         serverConn.getConnection().write(new ResourcePackResponse(packet.getId(), packet.getHash(),
             PlayerResourcePackStatusEvent.Status.DECLINED));
@@ -174,8 +178,10 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
         smc.setActiveSessionHandler(StateRegistry.PLAY,
             new TransitionSessionHandler(server, serverConn, resultFuture));
       }
-      if (player.getAppliedResourcePack() == null && resourcePackToApply != null) {
-        player.queueResourcePack(resourcePackToApply);
+      if (player.getAppliedResourcePacks().isEmpty() && !resourcePackToApply.isEmpty()) {
+        player.queueResourcePack(net.kyori.adventure.resource.ResourcePackRequest.resourcePackRequest()
+                .packs(resourcePackToApply).build());
+
       }
       smc.setAutoReading(true);
     }, smc.eventLoop());

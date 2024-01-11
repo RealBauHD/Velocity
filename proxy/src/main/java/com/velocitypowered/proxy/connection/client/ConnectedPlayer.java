@@ -84,17 +84,12 @@ import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayDeque;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
-import java.util.Optional;
-import java.util.Queue;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
+
 import net.kyori.adventure.audience.MessageType;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.identity.Identity;
@@ -154,8 +149,8 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   private @MonotonicNonNull List<String> serversToTry = null;
   private @MonotonicNonNull Boolean previousResourceResponse;
   private final Queue<net.kyori.adventure.resource.ResourcePackRequest> outstandingResourcePacks = new ArrayDeque<>();
-  private @Nullable ResourcePackInfo pendingResourcePack;
-  private @Nullable ResourcePackInfo appliedResourcePack;
+  private final List<net.kyori.adventure.resource.ResourcePackRequest> pendingResourcePacks = new ArrayList<>();
+  private final List<ResourcePackInfo> appliedResourcePacks = new ArrayList<>();
   private final @NotNull Pointers pointers =
       Player.super.pointers().toBuilder().withDynamic(Identity.UUID, this::getUniqueId)
           .withDynamic(Identity.NAME, this::getUsername)
@@ -165,7 +160,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
           .withStatic(FacetPointers.TYPE, Type.PLAYER).build();
   private @Nullable String clientBrand;
   private @Nullable Locale effectiveLocale;
-  private @Nullable IdentifiedKey playerKey;
+  private final @Nullable IdentifiedKey playerKey;
   private @Nullable ClientSettings clientSettingsPacket;
   private final ChatQueue chatQueue;
   private final ChatBuilderFactory chatBuilderFactory;
@@ -355,6 +350,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
         .component(translated).forIdentity(identity).toClient());
   }
 
+  @SuppressWarnings({"deprecation", "UnstableApiUsage"})
   @Override
   public void sendMessage(@NonNull Identity identity, @NonNull Component message,
                           @NonNull MessageType type) {
@@ -525,9 +521,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   public void sendResourcePacks(net.kyori.adventure.resource.@NotNull ResourcePackRequest request) {
     if (this.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_8) >= 0) {
       Preconditions.checkNotNull(request, "request");
-      for (final ResourcePackInfo pack : request.packs()) {
-        this.queueResourcePack(pack);
-      }
+      this.queueResourcePack(request);
     }
   }
 
@@ -1032,51 +1026,68 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
         }
       }
 
-      ResourcePackRequest request = new ResourcePackRequest();
-      request.setId(queued.getId());
-      request.setUrl(queued.getUrl());
-      if (queued.getHash() != null) {
-        request.setHash(ByteBufUtil.hexDump(queued.getHash()));
-      } else {
-        request.setHash("");
-      }
-      request.setRequired(queued.required());
-      request.setPrompt(queued.prompt() == null ? null :
-          new ComponentHolder(getProtocolVersion(), queued.prompt()));
+      for (final ResourcePackInfo pack : queued.packs()) {
+        ResourcePackRequest request = new ResourcePackRequest();
+        request.setId(pack.id());
+        request.setUrl(pack.uri().toString());
+        // TODO: Nullable??
+        if (pack.hash() != null) {
+          request.setHash(ByteBufUtil.hexDump(pack.hash().getBytes(StandardCharsets.UTF_8)));
+        } else {
+          request.setHash("");
+        }
+        request.setRequired(queued.required());
+        request.setPrompt(queued.prompt() == null ? null :
+                new ComponentHolder(getProtocolVersion(), queued.prompt()));
 
-      connection.write(request);
+        connection.write(request);
+      }
     }
   }
 
   @Override
   @Deprecated
-  public @Nullable ResourcePackInfo getAppliedResourcePack() {
-    //TODO which resource pack should be returned here?
-    return appliedResourcePack;
+  public com.velocitypowered.api.proxy.player.@Nullable ResourcePackInfo getAppliedResourcePack() {
+    if (appliedResourcePacks.isEmpty()) {
+      return null;
+    }
+    final ResourcePackInfo adventureResourcePack = appliedResourcePacks.get(0);
+    return server
+      .createResourcePackBuilder(adventureResourcePack.uri().toString())
+      .setId(adventureResourcePack.id())
+      .setHash(adventureResourcePack.hash().getBytes(StandardCharsets.UTF_8))
+      .build();
   }
 
   @Override
   @Deprecated
-  public @Nullable ResourcePackInfo getPendingResourcePack() {
-    //TODO which resource pack should be returned here?
-    return pendingResourcePack;
+  public com.velocitypowered.api.proxy.player.@Nullable ResourcePackInfo getPendingResourcePack() {
+    if (pendingResourcePacks.isEmpty()) {
+      return null;
+    }
+    final ResourcePackInfo adventureResourcePack = pendingResourcePacks.get(0).packs().get(0);
+    return server
+            .createResourcePackBuilder(adventureResourcePack.uri().toString())
+            .setId(adventureResourcePack.id())
+            .setHash(adventureResourcePack.hash().getBytes(StandardCharsets.UTF_8))
+            .build();
   }
 
   @Override
   public Collection<ResourcePackInfo> getAppliedResourcePacks() {
-    return Collections.EMPTY_LIST; //TODO
+    return List.copyOf(appliedResourcePacks);
   }
 
   @Override
-  public Collection<ResourcePackInfo> getPendingResourcePacks() {
-    return Collections.EMPTY_LIST; //TODO
+  public Collection<net.kyori.adventure.resource.ResourcePackRequest> getPendingResourcePacks() {
+    return List.copyOf(pendingResourcePacks);
   }
 
   /**
    * Clears the applied resource pack field.
    */
   public void clearAppliedResourcePack() {
-    appliedResourcePack = null;
+    appliedResourcePacks.clear();
   }
 
   /**
@@ -1084,35 +1095,47 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
    */
   public boolean onResourcePackResponse(PlayerResourcePackStatusEvent.Status status) {
     final boolean peek = status.isIntermediate();
-    final ResourcePackInfo queued = peek
+    final net.kyori.adventure.resource.ResourcePackRequest queued = peek
         ? outstandingResourcePacks.peek() : outstandingResourcePacks.poll();
 
-    server.getEventManager().fire(new PlayerResourcePackStatusEvent(this, status, queued))
-        .thenAcceptAsync(event -> {
-          if (event.getStatus() == PlayerResourcePackStatusEvent.Status.DECLINED
-              && event.getPackInfo() != null && event.getPackInfo().getShouldForce()
-              && (!event.isOverwriteKick() || event.getPlayer()
-              .getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_17) >= 0)
-          ) {
-            event.getPlayer().disconnect(Component
-                .translatable("multiplayer.requiredTexturePrompt.disconnect"));
-          }
-        });
+    final Consumer<ResourcePackInfo> fireResourcePackStatusEvent = (info) -> {
+      server.getEventManager().fire(new PlayerResourcePackStatusEvent(this, status, info))
+              .thenAcceptAsync(event -> {
+                if (event.getStatus() == PlayerResourcePackStatusEvent.Status.DECLINED
+                        && queued != null && queued.required()
+                        && (!event.isOverwriteKick() || event.getPlayer()
+                        .getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_17) >= 0)
+                ) {
+                  event.getPlayer().disconnect(Component
+                          .translatable("multiplayer.requiredTexturePrompt.disconnect"));
+                }
+              });
+    };
+
+    if (queued == null) {
+      fireResourcePackStatusEvent.accept(null);
+    } else {
+      for (ResourcePackInfo pack : queued.packs()) {
+        fireResourcePackStatusEvent.accept(pack);
+      }
+    }
 
     switch (status) {
       case ACCEPTED:
         previousResourceResponse = true;
-        pendingResourcePack = queued;
+        pendingResourcePacks.add(queued);
         break;
       case DECLINED:
         previousResourceResponse = false;
         break;
       case SUCCESSFUL:
-        appliedResourcePack = queued;
-        pendingResourcePack = null;
+        if (queued!= null) {
+          appliedResourcePacks.addAll(queued.packs());
+        }
+        pendingResourcePacks.clear();
         break;
       case FAILED_DOWNLOAD:
-        pendingResourcePack = null;
+        pendingResourcePacks.clear();
         break;
       default:
         break;
@@ -1122,16 +1145,10 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
       connection.eventLoop().execute(this::tickResourcePackQueue);
     }
 
-    return queued != null
-        && queued.getOriginalOrigin() != ResourcePackInfo.Origin.DOWNSTREAM_SERVER;
-  }
-
-  /**
-   * Gives an indication about the previous resource pack responses.
-   */
-  public @Nullable Boolean getPreviousResourceResponse() {
-    //TODO can probably be removed
-    return previousResourceResponse;
+    return true;
+    // TODO: todo?
+//    return queued != null
+//        && queued.getOriginalOrigin() != ResourcePackInfo.Origin.DOWNSTREAM_SERVER;
   }
 
   /**

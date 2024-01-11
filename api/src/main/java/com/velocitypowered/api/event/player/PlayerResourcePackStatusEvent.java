@@ -11,7 +11,8 @@ import com.google.common.base.Preconditions;
 import com.velocitypowered.api.event.annotation.AwaitingEvent;
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.proxy.Player;
-import com.velocitypowered.api.proxy.player.ResourcePackInfo;
+import net.kyori.adventure.resource.ResourcePackInfo;
+import net.kyori.adventure.resource.ResourcePackRequest;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -80,7 +81,7 @@ public class PlayerResourcePackStatusEvent {
 
   /**
    * Gets whether or not to override the kick resulting from
-   * {@link ResourcePackInfo#getShouldForce()} being true.
+   * {@link ResourcePackRequest#required()} being true.
    *
    * @return whether or not to overwrite the result
    */
@@ -89,7 +90,7 @@ public class PlayerResourcePackStatusEvent {
   }
 
   /**
-   * Set to true to prevent {@link ResourcePackInfo#getShouldForce()}
+   * Set to true to prevent {@link ResourcePackRequest#required()} ()}
    * from kicking the player.
    * Overwriting this kick is only possible on versions older than 1.17,
    * as the client or server will enforce this regardless. Cancelling the resulting
