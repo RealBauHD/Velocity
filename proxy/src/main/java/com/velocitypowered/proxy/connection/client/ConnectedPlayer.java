@@ -148,7 +148,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   private final CompletableFuture<Void> teardownFuture = new CompletableFuture<>();
   private @MonotonicNonNull List<String> serversToTry = null;
   private @MonotonicNonNull Boolean previousResourceResponse;
-  private final Queue<net.kyori.adventure.resource.ResourcePackRequest> outstandingResourcePacks = new ArrayDeque<>();
+  private final Queue<ResourcePackWrapper> outstandingResourcePacks = new ArrayDeque<>();
   private final List<net.kyori.adventure.resource.ResourcePackRequest> pendingResourcePacks = new ArrayList<>();
   private final List<ResourcePackInfo> appliedResourcePacks = new ArrayList<>();
   private final @NotNull Pointers pointers =
@@ -521,7 +521,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   public void sendResourcePacks(net.kyori.adventure.resource.@NotNull ResourcePackRequest request) {
     if (this.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_8) >= 0) {
       Preconditions.checkNotNull(request, "request");
-      this.queueResourcePack(request);
+      this.queueResourcePack(request, com.velocitypowered.api.proxy.player.ResourcePackInfo.Origin.PLUGIN_ON_PROXY);
     }
   }
 
@@ -911,7 +911,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
 
     DisconnectEvent.LoginStatus status;
     if (connectedPlayer.isPresent()) {
-      if (!connectedPlayer.get().getCurrentServer().isPresent()) {
+      if (connectedPlayer.get().getCurrentServer().isEmpty()) {
         status = LoginStatus.PRE_SERVER_JOIN;
       } else {
         status = connectedPlayer.get() == this ? LoginStatus.SUCCESSFUL_LOGIN
@@ -1007,15 +1007,29 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
    * Queues a resource-pack for sending to the player and sends it immediately if the queue is
    * empty.
    */
-  public void queueResourcePack(net.kyori.adventure.resource.ResourcePackRequest request) {
-    outstandingResourcePacks.add(request);
+  public void queueResourcePack(
+          net.kyori.adventure.resource.ResourcePackRequest request,
+          com.velocitypowered.api.proxy.player.ResourcePackInfo.Origin origin
+  ) {
+    outstandingResourcePacks.add(new ResourcePackWrapper(request, origin));
+    if (outstandingResourcePacks.size() == 1) {
+      tickResourcePackQueue();
+    }
+  }
+
+  /**
+   * Queues a resource-pack for sending to the player and sends it immediately if the queue is
+   * empty.
+   */
+  public void queueResourcePack(com.velocitypowered.api.proxy.player.ResourcePackInfo request) {
+    outstandingResourcePacks.add(new ResourcePackWrapper(request.asResourcePackRequest(), request.getOriginalOrigin()));
     if (outstandingResourcePacks.size() == 1) {
       tickResourcePackQueue();
     }
   }
 
   private void tickResourcePackQueue() {
-    net.kyori.adventure.resource.ResourcePackRequest queued = outstandingResourcePacks.peek();
+    ResourcePackWrapper queued = outstandingResourcePacks.peek();
 
     if (queued != null) {
       // Check if the player declined a resource pack once already
@@ -1024,7 +1038,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
         // Unless its 1.17+ and forced it will come back denied anyway
         while (!outstandingResourcePacks.isEmpty()) {
           queued = outstandingResourcePacks.peek();
-          if (queued.required() && getProtocolVersion()
+          if (queued.request.required() && getProtocolVersion()
               .compareTo(ProtocolVersion.MINECRAFT_1_17) >= 0) {
             break;
           }
@@ -1037,7 +1051,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
         }
       }
 
-      for (final ResourcePackInfo pack : queued.packs()) {
+      for (final ResourcePackInfo pack : queued.request.packs()) {
         ResourcePackRequest request = new ResourcePackRequest();
         request.setId(pack.id());
         request.setUrl(pack.uri().toString());
@@ -1047,9 +1061,9 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
         } else {
           request.setHash("");
         }
-        request.setRequired(queued.required());
-        request.setPrompt(queued.prompt() == null ? null :
-                new ComponentHolder(getProtocolVersion(), queued.prompt()));
+        request.setRequired(queued.request.required());
+        request.setPrompt(queued.request.prompt() == null ? null :
+                new ComponentHolder(getProtocolVersion(), queued.request.prompt()));
 
         connection.write(request);
       }
@@ -1106,14 +1120,14 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
    */
   public boolean onResourcePackResponse(PlayerResourcePackStatusEvent.Status status) {
     final boolean peek = status.isIntermediate();
-    final net.kyori.adventure.resource.ResourcePackRequest queued = peek
+    final ResourcePackWrapper queued = peek
         ? outstandingResourcePacks.peek() : outstandingResourcePacks.poll();
 
     final Consumer<ResourcePackInfo> fireResourcePackStatusEvent = (info) -> {
       server.getEventManager().fire(new PlayerResourcePackStatusEvent(this, status, info))
               .thenAcceptAsync(event -> {
                 if (event.getStatus() == PlayerResourcePackStatusEvent.Status.DECLINED
-                        && queued != null && queued.required()
+                        && queued != null && queued.request.required()
                         && (!event.isOverwriteKick() || event.getPlayer()
                         .getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_17) >= 0)
                 ) {
@@ -1126,7 +1140,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     if (queued == null) {
       fireResourcePackStatusEvent.accept(null);
     } else {
-      for (ResourcePackInfo pack : queued.packs()) {
+      for (ResourcePackInfo pack : queued.request.packs()) {
         fireResourcePackStatusEvent.accept(pack);
       }
     }
@@ -1134,14 +1148,14 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     switch (status) {
       case ACCEPTED:
         previousResourceResponse = true;
-        pendingResourcePacks.add(queued);
+        pendingResourcePacks.add(Objects.requireNonNull(queued).request);
         break;
       case DECLINED:
         previousResourceResponse = false;
         break;
       case SUCCESSFUL:
         if (queued!= null) {
-          appliedResourcePacks.addAll(queued.packs());
+          appliedResourcePacks.addAll(queued.request.packs());
         }
         pendingResourcePacks.clear();
         break;
@@ -1156,11 +1170,14 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
       connection.eventLoop().execute(this::tickResourcePackQueue);
     }
 
-    return true;
-    // TODO: todo?
-//    return queued != null
-//        && queued.getOriginalOrigin() != ResourcePackInfo.Origin.DOWNSTREAM_SERVER;
+    return queued != null
+        && queued.origin != com.velocitypowered.api.proxy.player.ResourcePackInfo.Origin.DOWNSTREAM_SERVER;
   }
+
+  private record ResourcePackWrapper(
+          net.kyori.adventure.resource.ResourcePackRequest request,
+          com.velocitypowered.api.proxy.player.ResourcePackInfo.Origin origin
+  ) {}
 
   /**
    * Sends a {@link KeepAlive} packet to the player with a random ID. The response will be ignored

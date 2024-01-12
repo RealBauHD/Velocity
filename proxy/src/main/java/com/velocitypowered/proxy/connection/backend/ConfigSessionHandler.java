@@ -140,7 +140,7 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
           resourcePackToApply.clear();
         }
 
-        serverConn.getPlayer().queueResourcePack(toSend.asResourcePackRequest());
+        serverConn.getPlayer().queueResourcePack(toSend);
       } else if (serverConn.getConnection() != null) {
         serverConn.getConnection().write(new ResourcePackResponse(packet.getId(), packet.getHash(),
             PlayerResourcePackStatusEvent.Status.DECLINED));
@@ -180,7 +180,7 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
       }
       if (player.getAppliedResourcePacks().isEmpty() && !resourcePackToApply.isEmpty()) {
         player.queueResourcePack(net.kyori.adventure.resource.ResourcePackRequest.resourcePackRequest()
-                .packs(resourcePackToApply).build());
+                .packs(resourcePackToApply).build(), ResourcePackInfo.Origin.DOWNSTREAM_SERVER);
 
       }
       smc.setAutoReading(true);
