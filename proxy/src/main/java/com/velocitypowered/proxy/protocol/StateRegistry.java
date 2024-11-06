@@ -360,7 +360,7 @@ public enum StateRegistry {
           map(0x28, MINECRAFT_1_20_3, false),
           map(0x2B, MINECRAFT_1_20_5, false),
           map(0x2D, MINECRAFT_1_21_2, false),
-          map(0x2E, MINECRAFT_1_21_4, false));
+          map(0x2F, MINECRAFT_1_21_4, false));
       serverbound.register(
           FinishedUpdatePacket.class, () -> FinishedUpdatePacket.INSTANCE,
           map(0x0B, MINECRAFT_1_20_2, false),
