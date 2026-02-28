@@ -48,7 +48,7 @@ public class ClosestLocaleMatcher {
    * @param locale locale to register
    */
   public void registerKnown(final Locale locale) {
-    if (locale.getLanguage().equals(new Locale("zh").getLanguage())) {
+    if (locale.getLanguage().equals("zh")) {
       return;
     }
 

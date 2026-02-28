@@ -59,7 +59,7 @@ public class VelocityPluginContainer implements PluginContainer {
           String name = this.description.getName().orElse(this.description.getId());
           this.service = Executors.unconfigurableExecutorService(
               Executors.newCachedThreadPool(
-                new ThreadFactoryBuilder().setDaemon(true)
+                new ThreadFactoryBuilder()
                     .setNameFormat(name + " - Task Executor #%d")
                     .setDaemon(true)
                     .build()
